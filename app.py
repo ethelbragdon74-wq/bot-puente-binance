@@ -4,7 +4,6 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Inicializar conexión a Binance usando variables de entorno
 exchange = ccxt.binance({
     'apiKey': os.environ.get('BINANCE_API_KEY'),
     'secret': os.environ.get('BINANCE_SECRET'),
@@ -23,13 +22,12 @@ def webhook():
         if not datos:
             return jsonify({"status": "error", "message": "No se recibieron datos"}), 400
 
-        ticker = datos.get('ticker')  # Ej: BTC/USDT
-        accion = datos.get('action')  # Ej: BUY o SELL
-        cantidad = float(datos.get('contracts', 0.001)) # Ajusta según tu estrategia
+        ticker = datos.get('ticker')
+        accion = datos.get('action')
+        cantidad = float(datos.get('contracts', 0.001))
 
         print(f"Ejecutando orden: {accion} {cantidad} {ticker}")
 
-        # Ejecución en Binance
         if accion == "BUY":
             orden = exchange.create_market_buy_order(ticker, cantidad)
         elif accion == "SELL":
