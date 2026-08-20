@@ -1,3 +1,4 @@
+# Solo lo esencial para reducir el consumo de memoria
 Flask==3.0.2
 gunicorn==21.2.0
 ccxt==4.3.0
