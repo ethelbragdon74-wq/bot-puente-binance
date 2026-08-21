@@ -1,52 +1,56 @@
-from flask import Flask, request
 import os
+import json
 import gspread
+from flask import Flask, request, jsonify
 from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
 
-# Configuración de Google Sheets
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-
-# Cargar credenciales desde el archivo secreto o variable de entorno si lo usas, 
-# o asegurarnos de que lea el archivo json configurado previamente.
-creds_path = 'credentials.json' # O el método que estés usando para autenticar
-
-@app.route('/')
+@app.route("/", methods=["GET"])
 def home():
-    return "Bot Puente Binance is Live 🚀"
+    return "El puente webhook de Ethel está activo y operando con éxito.", 200
 
-@app.route('/webhook', methods=['POST'])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        # Capturamos los datos que manda TradingView en formato JSON
-        data = request.json
-        print("Datos recibidos de TradingView:", data)
+        # Capturamos los datos que manda TradingView
+        datos = request.get_json(silent=True)
+        print("Datos recibidos:", datos)
         
-        if not data:
-            return "No JSON received", 400
+        if not datos:
+            return jsonify({"status": "error", "message": "No se recibieron datos"}), 400
 
-        # Extraemos variables básicas (ajusta según lo que mande tu alerta)
-        ticker = data.get('ticker', 'N/A')
-        action = data.get('action', 'N/A')
-        price = data.get('price', '0')
-        time_alert = data.get('time', 'N/A')
-
-        # Conexión a Google Sheets para guardar el registro
-        creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+        # Conexión a Google Sheets usando la variable de entorno de Render
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        
+        # Leemos las credenciales desde la variable de entorno segura
+        credenciales_str = os.environ.get("GOOGLE_CREDENTIALS")
+        if not credenciales_str:
+            return jsonify({"status": "error", "message": "Faltan credenciales de Google en el servidor"}), 500
+            
+        credenciales_dict = json.loads(credenciales_str)
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciales_dict, scope)
         client = gspread.authorize(creds)
         
         # Abrimos la hoja por su nombre exacto
         sheet = client.open("Tracker Validación - Bot BTCUSDT 4H").sheet1
-        
-        # Agregamos una fila con los datos
-        sheet.append_row([time_alert, ticker, action, price])
 
-        return "Success", 200
+        # Mapeo y guardado de los datos en la hoja
+        fila = [
+            str(datos.get('time', 'N/A')),
+            str(datos.get('ticker', 'N/A')),
+            str(datos.get('action', 'N/A')),
+            str(datos.get('price', '0'))
+        ]
+        
+        sheet.append_row(fila)
+        print(f"Registro exitoso en Google Sheets: {fila}")
+        return jsonify({"status": "success", "message": "Registrado en Sheets"}), 200
 
     except Exception as e:
-        print(f"Error procesando el webhook: {e}")
-        return str(e), 500
+        print(f"Error procesando el webhook: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+if __name__ == "__main__":
+    puerto = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=puerto)
