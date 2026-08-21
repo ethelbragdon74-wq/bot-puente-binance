@@ -1,34 +1,37 @@
 import os
+import gspread
+import json
 from flask import Flask, request, jsonify
+from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
 
-@app.route("/", methods=["GET"])
-def home():
-    return "El puente webhook de Ethel está activo y operando con éxito.", 200
+# Configuración de Google Sheets
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+# Asegúrate de subir tu archivo JSON al repo y ponerle este nombre:
+creds = ServiceAccountCredentials.from_json_keyfile_name('credenciales.json', scope)
+client = gspread.authorize(creds)
+sheet = client.open("Tracker Validación - Bot BTCUSDT 4H").sheet1
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    try:
-        # Recibe los datos enviados por TradingView (silent=True evita que colapse si no es un JSON válido)
-        datos_alerta = request.get_json(silent=True)
-        
-        if not datos_alerta:
-            return jsonify({"status": "error", "message": "No se recibieron datos o el formato no es JSON"}), 400
+    datos = request.get_json()
+    if not datos:
+        return jsonify({"status": "error"}), 400
 
-        print(f"Alerta recibida exitosamente desde TradingView: {datos_alerta}")
-        
-        # TODO: Aquí estructuraremos la orden directa hacia Binance en la siguiente fase
-        
-        return jsonify({
-            "status": "success", 
-            "message": "Señal procesada correctamente por el servidor propio"
-        }), 200
-
-    except Exception as e:
-        print(f"Error procesando la alerta: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+    # Extraemos los datos (Asegúrate que coincidan con el JSON de TradingView)
+    fila = [
+        "1", # ID Trade (puedes automatizarlo después)
+        datos.get('time', 'N/A'),
+        datos.get('action', 'N/A'),
+        datos.get('price', '0')
+    ]
+    
+    # Escribimos en la hoja
+    sheet.append_row(fila)
+    
+    print(f"Registro exitoso: {fila}")
+    return jsonify({"status": "success"}), 200
 
 if __name__ == "__main__":
-    puerto = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=puerto)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
