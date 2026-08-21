@@ -13,20 +13,20 @@ def home():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        # Capturamos los datos que manda TradingView
+        # Intentamos capturar el JSON de TradingView de forma flexible
         datos = request.get_json(silent=True)
-        print("Datos recibidos:", datos)
-        
         if not datos:
-            return jsonify({"status": "error", "message": "No se recibieron datos"}), 400
+            # Si viene como texto plano o formulario, intentamos leerlo
+            datos = request.form.to_dict()
+        
+        print("Datos recibidos en crudo:", datos)
 
         # Conexión a Google Sheets usando la variable de entorno de Render
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        
-        # Leemos las credenciales desde la variable de entorno segura
         credenciales_str = os.environ.get("GOOGLE_CREDENTIALS")
+        
         if not credenciales_str:
-            return jsonify({"status": "error", "message": "Faltan credenciales de Google en el servidor"}), 500
+            return jsonify({"status": "error", "message": "Faltan credenciales"}), 500
             
         credenciales_dict = json.loads(credenciales_str)
         creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciales_dict, scope)
@@ -35,20 +35,20 @@ def webhook():
         # Abrimos la hoja por su nombre exacto
         sheet = client.open("Tracker Validación - Bot BTCUSDT 4H").sheet1
 
-        # Mapeo y guardado de los datos en la hoja
-        fila = [
-            str(datos.get('time', 'N/A')),
-            str(datos.get('ticker', 'N/A')),
-            str(datos.get('action', 'N/A')),
-            str(datos.get('price', '0'))
-        ]
+        # Extraemos los datos o ponemos valores por defecto para evitar que falle
+        tiempo = str(datos.get('time', 'N/A'))
+        ticker = str(datos.get('ticker', 'BTCUSDT'))
+        accion = str(datos.get('action', 'ALERTA'))
+        precio = str(datos.get('price', '0'))
+
+        fila = [tiempo, ticker, accion, precio]
         
         sheet.append_row(fila)
-        print(f"Registro exitoso en Google Sheets: {fila}")
+        print(f"¡Éxito! Registro guardado en Google Sheets: {fila}")
         return jsonify({"status": "success", "message": "Registrado en Sheets"}), 200
 
     except Exception as e:
-        print(f"Error procesando el webhook: {str(e)}")
+        print(f"Error crítico procesando el webhook: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
