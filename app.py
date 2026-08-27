@@ -14,10 +14,14 @@ def home():
     return "🚀 El puente Webhook para validación de trading está activo y operando.", 200
 
 def enviar_alerta_telegram(mensaje):
-    """Función para disparar notificaciones en tiempo real a tu Telegram."""
-    TOKEN = "8810284890:AAFEB52QWHks8MjZBF1CzDJFPfhNTPooLN0"
+    """Función segura para disparar notificaciones sin exponer credenciales."""
+    TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")  # Se lee de forma segura desde Render
     CHAT_ID = "8016135480"  # Tu Chat ID personal confirmado
     
+    if not TOKEN:
+        print("❌ Error: No se encontró TELEGRAM_BOT_TOKEN en las variables de entorno.")
+        return
+
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
@@ -64,7 +68,7 @@ def guardar_en_sheets(datos):
         sheet.append_row(fila)
         print(f"✅ ¡Registro exitoso en Google Sheets!: {fila}")
 
-        # 🔔 Disparamos la notificación a Telegram con los datos del trade
+        # 🔔 Disparamos la notificación segura a Telegram
         mensaje_alerta = f"🚨 *¡Nueva Alerta de Trading!*\n\n📊 *ID:* {id_trade}\n⏰ *Hora:* {fecha_hora}\n⚡ *Acción:* {tipo}\n💰 *Precio:* {precio_alerta}"
         enviar_alerta_telegram(mensaje_alerta)
 
