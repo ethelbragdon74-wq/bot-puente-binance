@@ -4,6 +4,7 @@ import threading
 from flask import Flask, request, jsonify
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import requests
 
 app = Flask(__name__)
 
@@ -11,6 +12,24 @@ app = Flask(__name__)
 def home():
     """Ruta raíz para verificar que el servicio esté online."""
     return "🚀 El puente Webhook para validación de trading está activo y operando.", 200
+
+def enviar_alerta_telegram(mensaje):
+    """Función para disparar notificaciones en tiempo real a tu Telegram."""
+    TOKEN = "8810284890:AAFEB52QWHks8MjZBF1CzDJFPfhNTPooLN0"
+    CHAT_ID = "8016135480"  # Tu Chat ID personal confirmado
+    
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": mensaje,
+        "parse_mode": "Markdown"
+    }
+    
+    try:
+        response = requests.post(url, json=payload)
+        return response.json()
+    except Exception as e:
+        print(f"Error al enviar alerta a Telegram: {e}")
 
 def guardar_en_sheets(datos):
     """Función que corre en segundo plano para no bloquear la respuesta a TradingView."""
@@ -45,8 +64,12 @@ def guardar_en_sheets(datos):
         sheet.append_row(fila)
         print(f"✅ ¡Registro exitoso en Google Sheets!: {fila}")
 
+        # 🔔 Disparamos la notificación a Telegram con los datos del trade
+        mensaje_alerta = f"🚨 *¡Nueva Alerta de Trading!*\n\n📊 *ID:* {id_trade}\n⏰ *Hora:* {fecha_hora}\n⚡ *Acción:* {tipo}\n💰 *Precio:* {precio_alerta}"
+        enviar_alerta_telegram(mensaje_alerta)
+
     except Exception as e:
-        print(f"❌ Error crítico en segundo plano (Google Sheets): {str(e)}")
+        print(f"❌ Error crítico en segundo plano (Google Sheets/Telegram): {str(e)}")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -59,8 +82,7 @@ def webhook():
 
         print("📩 Datos recibidos en el webhook:", datos)
 
-        # 2. Truco de velocidad: Lanzamos el guardado en un hilo secundario
-        # Esto responde inmediatamente a TradingView evitando el timeout.
+        # 2. Truco de velocidad: Lanzamos el guardado y la notificación en un hilo secundario
         hilo = threading.Thread(target=guardar_en_sheets, args=(datos,))
         hilo.start()
 
