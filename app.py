@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import threading
 from flask import Flask, request, jsonify
 import gspread
@@ -36,8 +37,8 @@ def enviar_alerta_telegram(mensaje):
     except Exception as e:
         print(f"Error al enviar alerta a Telegram: {e}")
 
-def guardar_en_sheets(datos):
-    """Función que procesa métricas avanzadas (Slippage y Latencia) y guarda en segundo plano."""
+def guardar_en_sheets(datos, tiempo_inicio):
+    """Función que procesa métricas avanzadas (Slippage y Latencia real) y guarda en segundo plano."""
     try:
         scope = [
             "https://spreadsheets.google.com/feeds",
@@ -45,7 +46,7 @@ def guardar_en_sheets(datos):
         ]
         credenciales_str = os.environ.get("GOOGLE_CREDENTIALS")
         if not credenciales_str:
-            print("❌ Error: No se encontró la variable GOOGLE_CREDENTIALS en Environment.")
+            print("❌ Error: No se encontró GOOGLE_CREDENTIALS en Environment.")
             return
 
         credenciales_dict = json.loads(credenciales_str)
@@ -63,7 +64,7 @@ def guardar_en_sheets(datos):
         
         # Precios para calcular el Slippage
         precio_alerta = float(datos.get('price', 0))
-        precio_real = float(datos.get('real_price', precio_alerta)) # Si no viene, toma el de alerta
+        precio_real = float(datos.get('real_price', precio_alerta))
 
         # 2. Cálculo matemático del Slippage (%)
         slippage_pct = 0.0
@@ -73,20 +74,22 @@ def guardar_en_sheets(datos):
             else: # SELL / VENTA
                 slippage_pct = ((precio_alerta - precio_real) / precio_alerta) * 100
 
-        # Formatear a 4 decimales el porcentaje
         slippage_str = f"{slippage_pct:.4f}%"
 
-        # Latencia (puedes medirla si envías el timestamp del cliente, o dejar un estimado)
-        latencia = str(datos.get('latency', 'N/A'))
+        # 3. Cálculo de Latencia real del servidor en milisegundos
+        tiempo_fin = time.time()
+        latencia_ms = round((tiempo_fin - tiempo_inicio) * 1000, 2)
+        latencia_str = f"{latencia_ms} ms"
 
-        # Armado de la fila para tu Google Sheet (Asegúrate de que tus columnas coincidan con este orden)
-        # Orden sugerido: [ID, Fecha, Acción, Precio Alerta, Precio Real, Slippage, Latencia]
-        fila = [id_trade, fecha_hora, tipo, str(precio_alerta), str(precio_real), slippage_str, latencia]
+        # 4. Armado de la fila exacta para Google Sheets
+        # Columnas: [A: ID, B: Fecha, C: Tipo, D: Precio TV, E: Precio Binance, F: Slippage, G: P&L, H: Latencia]
+        # Se deja "" en la posición G para que tu fórmula de Google Sheets calcule el P&L sola.
+        fila = [id_trade, fecha_hora, tipo, str(precio_alerta), str(precio_real), slippage_str, "", latencia_str]
 
         sheet.append_row(fila)
         print(f"✅ ¡Registro avanzado exitoso en Google Sheets!: {fila}")
 
-        # 🔔 Notificación mejorada a Telegram con métricas de ejecución
+        # 🔔 Notificación mejorada a Telegram con métricas de ejecución y latencia
         mensaje_alerta = (
             f"🚨 *¡Alerta de Trading con Métricas!*\n\n"
             f"📊 *ID:* {id_trade}\n"
@@ -94,7 +97,8 @@ def guardar_en_sheets(datos):
             f"⚡ *Acción:* {tipo}\n"
             f"🎯 *Precio Alerta:* {precio_alerta}\n"
             f"💰 *Precio Real:* {precio_real}\n"
-            f"📉 *Slippage:* {slippage_str}"
+            f"📉 *Slippage:* {slippage_str}\n"
+            f"⏱️ *Latencia Webhook:* {latencia_str}"
         )
         enviar_alerta_telegram(mensaje_alerta)
 
@@ -105,13 +109,17 @@ def guardar_en_sheets(datos):
 def webhook():
     """Ruta para recibir las alertas avanzadas de TradingView."""
     try:
+        # Iniciamos el cronómetro exactamente al recibir el impacto HTTP
+        tiempo_inicio = time.time()
+
         datos = request.get_json(silent=True)
         if not datos:
             datos = request.form.to_dict() if request.form else {}
 
         print("📩 Datos avanzados recibidos:", datos)
 
-        hilo = threading.Thread(target=guardar_en_sheets, args=(datos,))
+        # Pasamos el tiempo de inicio al hilo en segundo plano
+        hilo = threading.Thread(target=guardar_en_sheets, args=(datos, tiempo_inicio))
         hilo.start()
 
         return jsonify({
