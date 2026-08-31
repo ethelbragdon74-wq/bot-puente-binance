@@ -1,95 +1,121 @@
-import os
 import json
-import time
+import os
 import threading
-from flask import Flask, request, jsonify
+import time
+from datetime import datetime
+from flask import Flask, jsonify, request
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import requests
-from datetime import datetime
 
 app = Flask(__name__)
+
 
 @app.route("/", methods=["GET"])
 def home():
     """Ruta raíz para verificar que el servicio esté online."""
-    return "🚀 El puente Webhook avanzado para trading está activo y operando.", 200
+    return (
+        "🚀 El puente Webhook avanzado para trading está activo y operando.",
+        200,
+    )
+
 
 def enviar_alerta_telegram(mensaje):
-    """Función segura para disparar notificaciones sin exponer credenciales."""
+    """Función segura para disparar notificaciones a Telegram."""
     TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
     CHAT_ID = "8016135480"  # Tu Chat ID personal confirmado
-    
+
     if not TOKEN:
-        print("❌ Error: No se encontró TELEGRAM_BOT_TOKEN en las variables de entorno.")
+        print(
+            "❌ Error: No se encontró TELEGRAM_BOT_TOKEN en las variables de"
+            " entorno."
+        )
         return
 
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
         "text": mensaje,
-        "parse_mode": "Markdown"
+        "parse_mode": "Markdown",
     }
-    
-    try:
-        response = requests.post(url, json=payload)
-        return response.json()
-    except Exception as e:
-        print(f"Error al enviar alerta a Telegram: {e}")
 
-def guardar_en_sheets(datos, tiempo_inicio):
-    """Función que procesa métricas avanzadas (Slippage y Latencia real) y guarda en segundo plano."""
     try:
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        print(f"❌ Error al enviar alerta a Telegram: {e}")
+
+
+def procesar_tarea_segundo_plano(datos, tiempo_inicio):
+    """Procesa el guardado en Google Sheets y la notificación a Telegram fuera del ciclo principal de la petición HTTP para garantizar latencia mínima en TradingView."""
+    try:
+        # 1. Autenticación y conexión con Google Sheets
         scope = [
             "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"
+            "https://www.googleapis.com/auth/drive",
         ]
         credenciales_str = os.environ.get("GOOGLE_CREDENTIALS")
         if not credenciales_str:
-            print("❌ Error: No se encontró GOOGLE_CREDENTIALS en Environment.")
+            print(
+                "❌ Error: No se encontró GOOGLE_CREDENTIALS en Environment."
+            )
             return
 
         credenciales_dict = json.loads(credenciales_str)
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciales_dict, scope)
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(
+            credenciales_dict, scope
+        )
         client = gspread.authorize(creds)
 
-        # Apertura de la hoja de cálculo por su nombre exacto
         nombre_hoja = "Tracker Validación - Bot BTCUSDT 4H"
         sheet = client.open(nombre_hoja).sheet1
 
-        # 1. Extracción de datos base del JSON que manda TradingView
-        id_trade = str(datos.get('id', datos.get('trade_id', 'TRADE-AUTO')))
-        fecha_hora = str(datos.get('time', datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-        tipo = str(datos.get('action', datos.get('type', 'ALERTA')))
-        
-        # Precios para calcular el Slippage
-        precio_alerta = float(datos.get('price', 0))
-        precio_real = float(datos.get('real_price', precio_alerta))
+        # 2. Extracción de variables desde el JSON
+        id_trade = str(datos.get("id", datos.get("trade_id", "TRADE-AUTO")))
+        fecha_hora = str(
+            datos.get(
+                "time", datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+        )
+        tipo = str(datos.get("action", datos.get("type", "ALERTA")))
 
-        # 2. Cálculo matemático del Slippage (%)
+        precio_alerta = float(datos.get("price", 0))
+        precio_real = float(datos.get("real_price", precio_alerta))
+
+        # 3. Cálculo de Slippage (%)
         slippage_pct = 0.0
         if precio_alerta > 0:
-            if tipo.upper() in ['BUY', 'COMPRA']:
-                slippage_pct = ((precio_real - precio_alerta) / precio_alerta) * 100
-            else: # SELL / VENTA
-                slippage_pct = ((precio_alerta - precio_real) / precio_alerta) * 100
+            if tipo.upper() in ["BUY", "COMPRA"]:
+                slippage_pct = (
+                    (precio_real - precio_alerta) / precio_alerta
+                ) * 100
+            else:  # SELL / VENTA
+                slippage_pct = (
+                    (precio_alerta - precio_real) / precio_alerta
+                ) * 100
 
         slippage_str = f"{slippage_pct:.4f}%"
 
-        # 3. Cálculo de Latencia real del servidor en milisegundos
+        # 4. Cálculo de latencia total del procesamiento en segundo plano
         tiempo_fin = time.time()
         latencia_ms = round((tiempo_fin - tiempo_inicio) * 1000, 2)
         latencia_str = f"{latencia_ms} ms"
 
-        # 4. Armado de la fila exacta para Google Sheets
-        # Columnas: [A: ID, B: Fecha, C: Tipo, D: Precio TV, E: Precio Binance, F: Slippage, G: P&L, H: Latencia]
-        # Se deja "" en la posición G para que tu fórmula de Google Sheets calcule el P&L sola.
-        fila = [id_trade, fecha_hora, tipo, str(precio_alerta), str(precio_real), slippage_str, "", latencia_str]
+        # 5. Inserción de la fila en Google Sheets
+        fila = [
+            id_trade,
+            fecha_hora,
+            tipo,
+            str(precio_alerta),
+            str(precio_real),
+            slippage_str,
+            "",
+            latencia_str,
+        ]
 
         sheet.append_row(fila)
-        print(f"✅ ¡Registro avanzado exitoso en Google Sheets!: {fila}")
+        print(f"✅ ¡Registro asíncrono exitoso en Google Sheets!: {fila}")
 
-        # 🔔 Notificación mejorada a Telegram con métricas de ejecución y latencia
+        # 6. Notificación a Telegram
         mensaje_alerta = (
             f"🚨 *¡Alerta de Trading con Métricas!*\n\n"
             f"📊 *ID:* {id_trade}\n"
@@ -98,39 +124,49 @@ def guardar_en_sheets(datos, tiempo_inicio):
             f"🎯 *Precio Alerta:* {precio_alerta}\n"
             f"💰 *Precio Real:* {precio_real}\n"
             f"📉 *Slippage:* {slippage_str}\n"
-            f"⏱️ *Latencia Webhook:* {latencia_str}"
+            f"⏱️ *Latencia Procesamiento:* {latencia_str}"
         )
         enviar_alerta_telegram(mensaje_alerta)
 
     except Exception as e:
-        print(f"❌ Error crítico en segundo plano: {str(e)}")
+        print(f"❌ Error crítico en hilo secundario: {str(e)}")
+
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Ruta para recibir las alertas avanzadas de TradingView."""
-    try:
-        # Iniciamos el cronómetro exactamente al recibir el impacto HTTP
-        tiempo_inicio = time.time()
+    """Ruta ultra-rápida para recibir Webhooks de TradingView.
 
+    Responde en <50ms y transfiere la carga pesada a un hilo secundario.
+    """
+    tiempo_inicio = time.time()
+
+    try:
         datos = request.get_json(silent=True)
         if not datos:
             datos = request.form.to_dict() if request.form else {}
 
-        print("📩 Datos avanzados recibidos:", datos)
+        print("📩 Webhook recibido. Iniciando procesamiento asíncrono:", datos)
 
-        # Pasamos el tiempo de inicio al hilo en segundo plano
-        hilo = threading.Thread(target=guardar_en_sheets, args=(datos, tiempo_inicio))
+        # Disparar la lógica pesada en un hilo independiente (segundo plano)
+        hilo = threading.Thread(
+            target=procesar_tarea_segundo_plano, args=(datos, tiempo_inicio)
+        )
+        hilo.daemon = True
         hilo.start()
 
-        return jsonify({
-            "status": "success",
-            "message": "Alerta avanzada procesada correctamente",
-            "data_recibida": datos
-        }), 200
+        # Responder de inmediato a TradingView para evitar timeouts
+        return (
+            jsonify({
+                "status": "success",
+                "message": "Alerta recibida e iniciada en segundo plano",
+            }),
+            200,
+        )
 
     except Exception as e:
-        print(f"❌ Error en webhook: {str(e)}")
+        print(f"❌ Error en recepción de webhook: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
 
 if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", 5000))
