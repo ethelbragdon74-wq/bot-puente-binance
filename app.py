@@ -10,15 +10,13 @@ import requests
 
 app = Flask(__name__)
 
-
 @app.route("/", methods=["GET"])
 def home():
-    """Ruta raíz para verificar que el servicio esté online."""
+    """Ruta raíz para verificar que el servicio de la Startup esté online."""
     return (
-        "🚀 El puente Webhook avanzado para trading está activo y operando.",
+        "🚀 El puente Webhook avanzado para MES Quant V5 está activo y operando.",
         200,
     )
-
 
 def enviar_alerta_telegram(mensaje):
     """Función segura para disparar notificaciones a Telegram."""
@@ -26,10 +24,7 @@ def enviar_alerta_telegram(mensaje):
     CHAT_ID = "8016135480"  # Tu Chat ID personal confirmado
 
     if not TOKEN:
-        print(
-            "❌ Error: No se encontró TELEGRAM_BOT_TOKEN en las variables de"
-            " entorno."
-        )
+        print("❌ Error: No se encontró TELEGRAM_BOT_TOKEN en las variables de entorno.")
         return
 
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -44,9 +39,8 @@ def enviar_alerta_telegram(mensaje):
     except Exception as e:
         print(f"❌ Error al enviar alerta a Telegram: {e}")
 
-
 def procesar_tarea_segundo_plano(datos, tiempo_inicio):
-    """Procesa el guardado en Google Sheets y la notificación a Telegram fuera del ciclo principal de la petición HTTP para garantizar latencia mínima."""
+    """Procesa el guardado en Google Sheets y la notificación a Telegram con latencia mínima."""
     try:
         # 1. Autenticación y conexión con Google Sheets
         scope = [
@@ -55,9 +49,7 @@ def procesar_tarea_segundo_plano(datos, tiempo_inicio):
         ]
         credenciales_str = os.environ.get("GOOGLE_CREDENTIALS")
         if not credenciales_str:
-            print(
-                "❌ Error: No se encontró GOOGLE_CREDENTIALS en Environment."
-            )
+            print("❌ Error: No se encontró GOOGLE_CREDENTIALS en Environment.")
             return
 
         credenciales_dict = json.loads(credenciales_str)
@@ -66,63 +58,43 @@ def procesar_tarea_segundo_plano(datos, tiempo_inicio):
         )
         client = gspread.authorize(creds)
 
-        nombre_hoja = "Tracker Validación - Bot BTCUSDT 4H"
+        # IMPORTANTE: Asegúrate de que tu hoja en Google Drive se llame exactamente así
+        nombre_hoja = "Tracker Validación - MES Quant"
         sheet = client.open(nombre_hoja).sheet1
 
-        # 2. Extracción Híbrida Flexible (Acepta llaves en Español e Inglés)
-        id_trade = str(
-            datos.get(
-                "id_trade", datos.get("id", datos.get("trade_id", "TRADE-AUTO"))
-            )
-        )
-        fecha_hora = str(
-            datos.get(
-                "timestamp",
-                datos.get("time", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            )
-        )
-        tipo = str(
-            datos.get("accion", datos.get("action", datos.get("type", "ALERTA")))
-        )
+        # 2. Extracción Híbrida Flexible
+        id_trade = str(datos.get("id_trade", datos.get("id", datos.get("trade_id", "TRADE-AUTO"))))
+        fecha_hora = str(datos.get("timestamp", datos.get("time", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))))
+        tipo = str(datos.get("accion", datos.get("action", datos.get("type", "ALERTA"))))
 
         precio_alerta = float(datos.get("precio_alerta", datos.get("price", 0)))
-        precio_real = float(
-            datos.get("precio_real", datos.get("real_price", precio_alerta))
-        )
-        volumen = float(datos.get("volumen", datos.get("volume", 0)))
+        precio_real = float(datos.get("precio_real", datos.get("real_price", precio_alerta)))
+        volumen = float(datos.get("volumen", datos.get("volume", datos.get("contracts", 1))))
 
         # 3. Cálculo de Slippage (%)
         slippage_pct = 0.0
         if precio_alerta > 0:
-            if tipo.upper() in ["BUY", "COMPRA"]:
-                slippage_pct = (
-                    (precio_real - precio_alerta) / precio_alerta
-                ) * 100
-            else:  # SELL / VENTA
-                slippage_pct = (
-                    (precio_alerta - precio_real) / precio_alerta
-                ) * 100
+            if tipo.upper() in ["BUY", "COMPRA", "LONG"]:
+                slippage_pct = ((precio_real - precio_alerta) / precio_alerta) * 100
+            else:  # SELL / VENTA / SHORT
+                slippage_pct = ((precio_alerta - precio_real) / precio_alerta) * 100
 
         slippage_str = f"{slippage_pct:.4f}%"
 
-        # 4. Cálculo de latencia total del procesamiento en segundo plano
+        # 4. Cálculo de latencia
         tiempo_fin = time.time()
         latencia_ms = round((tiempo_fin - tiempo_inicio) * 1000, 2)
         latencia_str = f"{latencia_ms} ms"
 
-        # 5. Lógica de Negocio: Estado y Fórmula Dinámica de P&L
-        estado = "Abierto" if tipo.upper() in ["BUY", "COMPRA"] else "Cerrado"
+        # 5. Lógica de Negocio para Futuros (MES)
+        estado = "Abierto" if tipo.upper() in ["BUY", "COMPRA", "LONG"] else "Cerrado"
 
-        # Identificar la siguiente fila disponible para estructurar la fórmula de Google Sheets
         registros_actuales = len(sheet.get_all_values())
         siguiente_fila = registros_actuales + 1
 
-        # Fórmula inyectable (Si Estado == Abierto -> calcula P&L en tiempo real con GOOGLEFINANCE, si no -> "Cerrado")
-        formula_pnl = f'=IF(J{siguiente_fila}="Abierto", (GOOGLEFINANCE("CURRENCY:BTCUSD") - E{siguiente_fila}) * G{siguiente_fila}, "Cerrado")'
+        formula_pnl = f'=IF(J{siguiente_fila}="Cerrado", "Calculado por Broker", "En Progreso")'
 
-        # 6. Inserción de la fila mapeada correctamente
-        # Col A: ID Trade | Col B: Fecha/Hora | Col C: Tipo | Col D: Precio Alerta | Col E: Precio Real
-        # Col F: Slippage | Col G: Volumen BTC | Col H: P&L USDT | Col I: Latencia | Col J: Estado
+        # 6. Inserción de la fila en Google Sheets
         fila = [
             id_trade,
             fecha_hora,
@@ -136,19 +108,18 @@ def procesar_tarea_segundo_plano(datos, tiempo_inicio):
             estado,
         ]
 
-        # IMPORTANTE: USER_ENTERED activa la ejecución de la fórmula nativa en Google Sheets
         sheet.append_row(fila, value_input_option="USER_ENTERED")
-        print(f"✅ ¡Registro asíncrono exitoso en Google Sheets!: {fila}")
+        print(f"✅ ¡Registro exitoso en Google Sheets!: {fila}")
 
-        # 7. Notificación enriquecida a Telegram
+        # 7. Notificación a Telegram
         mensaje_alerta = (
-            f"🚨 *¡Alerta de Trading con Métricas!*\n\n"
+            f"🚨 *¡Alerta MES Quant V5!*\n\n"
             f"📊 *ID:* {id_trade}\n"
             f"⏰ *Hora:* {fecha_hora}\n"
             f"⚡ *Acción:* {tipo}\n"
-            f"🎯 *Precio Alerta:* {precio_alerta}\n"
+            f"🎯 *Precio TV:* {precio_alerta}\n"
             f"💰 *Precio Real:* {precio_real}\n"
-            f"📦 *Volumen BTC:* {volumen}\n"
+            f"📦 *Contratos:* {volumen}\n"
             f"📉 *Slippage:* {slippage_str}\n"
             f"⏱️ *Latencia:* {latencia_str}\n"
             f"🚦 *Estado:* {estado}"
@@ -158,13 +129,9 @@ def procesar_tarea_segundo_plano(datos, tiempo_inicio):
     except Exception as e:
         print(f"❌ Error crítico en hilo secundario: {str(e)}")
 
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Ruta ultra-rápida para recibir Webhooks de TradingView.
-
-    Responde en <50ms y transfiere la carga pesada a un hilo secundario.
-    """
+    """Ruta ultra-rápida para recibir Webhooks de TradingView."""
     tiempo_inicio = time.time()
 
     try:
@@ -174,26 +141,15 @@ def webhook():
 
         print("📩 Webhook recibido. Iniciando procesamiento asíncrono:", datos)
 
-        # Disparar procesamiento asíncrono en segundo plano
-        hilo = threading.Thread(
-            target=procesar_tarea_segundo_plano, args=(datos, tiempo_inicio)
-        )
+        hilo = threading.Thread(target=procesar_tarea_segundo_plano, args=(datos, tiempo_inicio))
         hilo.daemon = True
         hilo.start()
 
-        # Responder inmediatamente a TradingView para garantizar disponibilidad
-        return (
-            jsonify({
-                "status": "success",
-                "message": "Alerta recibida e iniciada en segundo plano",
-            }),
-            200,
-        )
+        return jsonify({"status": "success", "message": "Alerta recibida e iniciada"}), 200
 
     except Exception as e:
         print(f"❌ Error en recepción de webhook: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
-
 
 if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", 5000))
