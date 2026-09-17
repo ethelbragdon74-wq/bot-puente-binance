@@ -14,7 +14,7 @@ app = Flask(__name__)
 def home():
     """Ruta raíz para verificar que el servicio de la Startup esté online."""
     return (
-        "🚀 El puente cuantitativo MES Quant V5 con ejecución directa en Tradovate (Demo) está activo.",
+        "🚀 El puente cuantitativo MES Quant V5 con ejecución directa en Tradovate (Live/Prop Firm) está activo.",
         200,
     )
 
@@ -40,7 +40,7 @@ def enviar_alerta_telegram(mensaje):
         print(f"❌ Error al enviar alerta a Telegram: {e}")
 
 def ejecutar_orden_tradovate(accion, volumen, simbolo="MESZ6"):
-    """Conexión directa con la URL base correcta de Tradovate (Demo)."""
+    """Conexión directa con la URL base correcta de Tradovate (Live para cuentas de Fondeo)."""
     user = os.environ.get("TRADOVATE_USER")
     password = os.environ.get("TRADOVATE_PASSWORD")
     account_id = os.environ.get("TRADOVATE_ACCOUNT_ID")
@@ -49,8 +49,8 @@ def ejecutar_orden_tradovate(accion, volumen, simbolo="MESZ6"):
     cid = os.environ.get("TRADOVATE_CID", "8")
     sec = os.environ.get("TRADOVATE_SEC", "")
 
-    # URL base correcta y verificada para el entorno de simulación
-    base_url = "https://demo.tradovateapi.com"  
+    # URL base pivotada al entorno Live para sincronizar con MyFundedFutures
+    base_url = "https://live.tradovateapi.com"  
 
     if not user or not password or not account_id:
         print("❌ Error: Faltan credenciales principales de Tradovate en las variables de entorno.")
@@ -106,7 +106,7 @@ def ejecutar_orden_tradovate(accion, volumen, simbolo="MESZ6"):
         order_response = requests.post(order_url, json=order_payload, headers=headers_auth, timeout=5)
         
         if order_response.status_code == 200:
-            print(f"✅ ¡Orden ejecutada con éxito en Tradovate (Demo)!: {order_response.json()}")
+            print(f"✅ ¡Orden ejecutada con éxito en Tradovate (Live)!: {order_response.json()}")
             return True
         else:
             print(f"❌ Error al colocar orden en Tradovate: {order_response.text}")
@@ -127,7 +127,7 @@ def procesar_tarea_segundo_plano(datos, tiempo_inicio):
         volumen = int(datos.get("volumen", datos.get("contracts", 1)))
         simbolo = str(datos.get("simbolo", "MESZ6"))
 
-        # 2. Ejecución real en el Bróker (Tradovate Demo)
+        # 2. Ejecución real en el Bróker (Tradovate Live)
         exito_broker = ejecutar_orden_tradovate(tipo, volumen, simbolo)
         estado_broker = "Ejecutada en Bróker" if exito_broker else "Error en Bróker"
 
@@ -165,7 +165,7 @@ def procesar_tarea_segundo_plano(datos, tiempo_inicio):
 
         # 4. Notificación a Telegram
         mensaje_alerta = (
-            f"🚨 *¡Ejecución MES Quant V5 (Demo/Validación)*\n\n"
+            f"🚨 *¡Ejecución MES Quant V5 (Live/Prop Firm)*\n\n"
             f"📊 *ID:* {id_trade}\n"
             f"⏰ *Hora:* {fecha_hora}\n"
             f"⚡ *Acción:* {tipo}\n"
@@ -193,7 +193,7 @@ def webhook():
         hilo.daemon = True
         hilo.start()
 
-        return jsonify({"status": "success", "message": "Orden procesada hacia Tradovate Demo"}), 200
+        return jsonify({"status": "success", "message": "Orden procesada hacia Tradovate Live"}), 200
 
     except Exception as e:
         print(f"❌ Error en recepción de webhook: {str(e)}")
