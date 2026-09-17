@@ -40,28 +40,34 @@ def enviar_alerta_telegram(mensaje):
         print(f"❌ Error al enviar alerta a Telegram: {e}")
 
 def ejecutar_orden_tradovate(accion, volumen, simbolo="MESZ6"):
-    """Conexión directa con la API de Tradovate (Entorno Demo / Evaluación MFFU)."""
+    """Conexión directa con la URL base correcta de Tradovate (Demo)."""
     user = os.environ.get("TRADOVATE_USER")
     password = os.environ.get("TRADOVATE_PASSWORD")
     account_id = os.environ.get("TRADOVATE_ACCOUNT_ID")
     
-    # URL corregida para cuentas de evaluación / simulación de Tradovate
-    base_url = "https://demo.tradovateapi.com/v1"  
+    app_id = os.environ.get("TRADOVATE_APP_ID", "QuantV5Starter")
+    cid = os.environ.get("TRADOVATE_CID", "8")
+    sec = os.environ.get("TRADOVATE_SEC", "")
+
+    # URL base correcta y verificada para el entorno de simulación
+    base_url = "https://demo.tradovateapi.com"  
 
     if not user or not password or not account_id:
-        print("❌ Error: Faltan credenciales de Tradovate en las variables de entorno.")
+        print("❌ Error: Faltan credenciales principales de Tradovate en las variables de entorno.")
         return False
 
     try:
-        # 1. Obtener Token de Autenticación
-        auth_url = f"{base_url}/auth/accesstokenstring"
+        # 1. Autenticación contra el endpoint de request token usando la URL base
+        auth_url = f"{base_url}/v1/auth/accesstokenrequest"
         auth_payload = {
             "name": user,
             "password": password,
-            "appId": "QuantV5Starter",
+            "appId": app_id,
             "appVersion": "1.0",
-            "device": "ServerRender"
+            "cid": int(cid) if str(cid).isdigit() else 8,
         }
+        if sec:
+            auth_payload["sec"] = sec
         
         headers = {"Content-Type": "application/json"}
         auth_response = requests.post(auth_url, json=auth_payload, headers=headers, timeout=5)
@@ -70,7 +76,13 @@ def ejecutar_orden_tradovate(accion, volumen, simbolo="MESZ6"):
             print(f"❌ Error de autenticación en Tradovate: {auth_response.text}")
             return False
             
-        token = auth_response.text.strip().replace('"', '')
+        res_data = auth_response.json()
+        token = res_data.get("accessToken")
+        
+        if not token:
+            print(f"❌ No se encontró 'accessToken' en la respuesta: {res_data}")
+            return False
+
         headers_auth = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
@@ -79,8 +91,8 @@ def ejecutar_orden_tradovate(accion, volumen, simbolo="MESZ6"):
         # 2. Traducir acción al formato de Tradovate (Buy / Sell)
         action_str = "Buy" if accion.upper() in ["BUY", "COMPRA", "LONG"] else "Sell"
 
-        # 3. Enviar la orden de mercado
-        order_url = f"{base_url}/order/placeorder"
+        # 3. Enviar la orden de mercado usando la URL base
+        order_url = f"{base_url}/v1/order/placeorder"
         order_payload = {
             "accountSpec": account_id,
             "accountId": int(account_id),
@@ -115,7 +127,7 @@ def procesar_tarea_segundo_plano(datos, tiempo_inicio):
         volumen = int(datos.get("volumen", datos.get("contracts", 1)))
         simbolo = str(datos.get("simbolo", "MESZ6"))
 
-        # 2. Ejecución real en el Bróker (Tradovate Demo / MFFU)
+        # 2. Ejecución real en el Bróker (Tradovate Demo)
         exito_broker = ejecutar_orden_tradovate(tipo, volumen, simbolo)
         estado_broker = "Ejecutada en Bróker" if exito_broker else "Error en Bróker"
 
@@ -142,7 +154,7 @@ def procesar_tarea_segundo_plano(datos, tiempo_inicio):
                 fecha_hora,
                 tipo,
                 str(precio_alerta),
-                str(precio_alerta), # Precio real simulado de entrada
+                str(precio_alerta),
                 "0.00%",
                 str(volumen),
                 formula_pnl,
